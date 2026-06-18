@@ -17,6 +17,8 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
     list = list.filter(a => deptUserIds.includes(a.user_id))
   }
 
+  list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
   const total = list.length
   const items = list.slice((page - 1) * pageSize, page * pageSize).map(app => {
     const user = db.users.findById(app.user_id)

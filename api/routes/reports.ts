@@ -16,28 +16,37 @@ router.get('/monthly', async (req: Request, res: Response): Promise<void> => {
     app.created_at.slice(0, 7) === targetMonth
   )
 
-  const monthReimbursements = allReimbursements.filter(r =>
-    r.created_at.slice(0, 7) === targetMonth
-  )
+  const byDepartment: Record<string, { count: number; total_budget: number; total_actual: number; total_subsidy: number }> = {}
+  const byDestination: Record<string, { count: number; total_budget: number; total_actual: number; total_subsidy: number }> = {}
 
-  const byDepartment: Record<string, { count: number; total_budget: number; total_actual: number }> = {}
+  let totalActual = 0
+  let totalSubsidy = 0
+
   for (const app of monthApplications) {
     const user = users.find(u => u.id === app.user_id)
     const dept = user?.department || '未知'
-    if (!byDepartment[dept]) byDepartment[dept] = { count: 0, total_budget: 0, total_actual: 0 }
+    const reimb = allReimbursements.find(r => r.application_id === app.id)
+
+    if (!byDepartment[dept]) byDepartment[dept] = { count: 0, total_budget: 0, total_actual: 0, total_subsidy: 0 }
     byDepartment[dept].count++
     byDepartment[dept].total_budget += app.total_cost
-    const reimb = monthReimbursements.find(r => r.application_id === app.id)
-    if (reimb) byDepartment[dept].total_actual += reimb.total_actual
-  }
+    if (reimb) {
+      byDepartment[dept].total_actual += reimb.total_actual
+      byDepartment[dept].total_subsidy += reimb.subsidy_amount
+    }
 
-  const byDestination: Record<string, { count: number; total_budget: number; total_actual: number }> = {}
-  for (const app of monthApplications) {
-    if (!byDestination[app.city]) byDestination[app.city] = { count: 0, total_budget: 0, total_actual: 0 }
+    if (!byDestination[app.city]) byDestination[app.city] = { count: 0, total_budget: 0, total_actual: 0, total_subsidy: 0 }
     byDestination[app.city].count++
     byDestination[app.city].total_budget += app.total_cost
-    const reimb = monthReimbursements.find(r => r.application_id === app.id)
-    if (reimb) byDestination[app.city].total_actual += reimb.total_actual
+    if (reimb) {
+      byDestination[app.city].total_actual += reimb.total_actual
+      byDestination[app.city].total_subsidy += reimb.subsidy_amount
+    }
+
+    if (reimb) {
+      totalActual += reimb.total_actual
+      totalSubsidy += reimb.subsidy_amount
+    }
   }
 
   const monthlyData: Record<string, { applications: number; budget: number; actual: number }> = {}
@@ -65,8 +74,6 @@ router.get('/monthly', async (req: Request, res: Response): Promise<void> => {
     })
 
   const totalBudget = monthApplications.reduce((sum, a) => sum + a.total_cost, 0)
-  const totalActual = monthReimbursements.reduce((sum, r) => sum + r.total_actual, 0)
-  const totalSubsidy = monthReimbursements.reduce((sum, r) => sum + r.subsidy_amount, 0)
   const pendingCount = monthApplications.filter(a => a.status === 'pending').length
   const approvedCount = monthApplications.filter(a => a.status === 'approved').length
   const rejectedCount = monthApplications.filter(a => a.status === 'rejected').length
@@ -85,8 +92,8 @@ router.get('/monthly', async (req: Request, res: Response): Promise<void> => {
         approved_count: approvedCount,
         rejected_count: rejectedCount,
       },
-      byDepartment: Object.entries(byDepartment).map(([department, data]) => ({ department, ...data })),
-      byDestination: Object.entries(byDestination).map(([city, data]) => ({ city, ...data })),
+      by_department: Object.entries(byDepartment).map(([department, data]) => ({ department, ...data })),
+      by_destination: Object.entries(byDestination).map(([city, data]) => ({ city, ...data })),
       trend,
     },
   })

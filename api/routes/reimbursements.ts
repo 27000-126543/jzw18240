@@ -11,6 +11,8 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
   let list = db.reimbursements.findAll()
   if (status) list = list.filter(r => r.status === status)
 
+  list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
   const total = list.length
   const items = list.slice((page - 1) * pageSize, page * pageSize).map(r => {
     const application = db.applications.findById(r.application_id)

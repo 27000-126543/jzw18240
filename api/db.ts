@@ -93,12 +93,12 @@ export interface SubsidyRate {
 }
 
 let nextUserId = 7
-let nextApplicationId = 6
-let nextApprovalId = 10
+let nextApplicationId = 16
+let nextApprovalId = 20
 let nextBookingId = 4
-let nextReimbursementId = 3
-let nextApprovalRouteId = 4
-let nextApprovalRouteStepId = 7
+let nextReimbursementId = 9
+let nextApprovalRouteId = 10
+let nextApprovalRouteStepId = 17
 let nextSubsidyStandardId = 9
 let nextSubsidyRateId = 25
 

@@ -152,12 +152,14 @@ export interface ReportData {
     count: number
     total_budget: number
     total_actual: number
+    total_subsidy: number
   }[]
   by_destination: {
     city: string
     count: number
     total_budget: number
     total_actual: number
+    total_subsidy: number
   }[]
   trend: {
     month: string

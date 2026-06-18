@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useStore } from '@/store'
 import type { Application, SubsidyStandard, SubsidyRate } from '@/types'
-import { ArrowLeft, Receipt, MapPin, Calendar, DollarSign } from 'lucide-react'
+import { ArrowLeft, Receipt, MapPin, DollarSign, RefreshCw } from 'lucide-react'
 
 interface SubsidyResult {
   standard: SubsidyStandard | null
@@ -26,30 +26,34 @@ export default function NewReimbursement() {
 
   const appId = Number(applicationId)
 
+  const loadSubsidy = async (city: string, days: number) => {
+    try {
+      const standards = await fetchApi<SubsidyStandard[]>('/api/admin/subsidy-standards')
+      const standard = standards.find(s => s.city === city) || null
+      const rates = standard?.rates || []
+      const accommodationRate = rates.find(r => r.category === '住宿')?.daily_amount || 0
+      const mealRate = rates.find(r => r.category === '餐饮')?.daily_amount || 0
+      const transportRate = rates.find(r => r.category === '交通')?.daily_amount || 0
+      setSubsidy({
+        standard,
+        rates,
+        accommodation: accommodationRate * days,
+        meal: mealRate * days,
+        transport: transportRate * days,
+        total: (accommodationRate + mealRate + transportRate) * days,
+      })
+    } catch {
+      setSubsidy(null)
+    }
+  }
+
   useEffect(() => {
     if (!appId) return
     setLoading(true)
     fetchApi<Application>(`/api/applications/${appId}`)
       .then((app) => {
         setApplication(app)
-        const city = app.city
-        const days = app.days
-        const tier = ['北京', '上海'].includes(city) ? 'tier1' : ['广州', '深圳', '成都', '杭州'].includes(city) ? 'tier2' : 'tier3'
-        const accommodationRate = tier === 'tier1' ? 500 : tier === 'tier2' ? 400 : 300
-        const mealRate = tier === 'tier1' ? 100 : tier === 'tier2' ? 80 : 60
-        const transportRate = tier === 'tier1' ? 80 : tier === 'tier2' ? 60 : 40
-        setSubsidy({
-          standard: { id: 0, city, city_tier: tier },
-          rates: [
-            { id: 1, standard_id: 0, category: '住宿', daily_amount: accommodationRate },
-            { id: 2, standard_id: 0, category: '餐饮', daily_amount: mealRate },
-            { id: 3, standard_id: 0, category: '交通', daily_amount: transportRate },
-          ],
-          accommodation: accommodationRate * days,
-          meal: mealRate * days,
-          transport: transportRate * days,
-          total: (accommodationRate + mealRate + transportRate) * days,
-        })
+        return loadSubsidy(app.city, app.days)
       })
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -84,7 +88,20 @@ export default function NewReimbursement() {
     setSubmitting(false)
   }
 
-  const tierLabel = (tier: string) => tier === 'tier1' ? '一线城市' : tier === 'tier2' ? '二线城市' : '三线城市'
+  const handleRefreshSubsidy = () => {
+    if (application) {
+      loadSubsidy(application.city, application.days)
+    }
+  }
+
+  const tierLabel = (tier: string) => {
+    switch (tier) {
+      case 'tier1': return '一线城市'
+      case 'tier2': return '二线城市'
+      case 'tier3': return '三线城市'
+      default: return tier
+    }
+  }
 
   if (loading) {
     return <div className="rounded-lg bg-white p-12 text-center text-auxiliary shadow-sm">加载中...</div>
@@ -168,10 +185,19 @@ export default function NewReimbursement() {
           </div>
 
           <div className="rounded-lg border-2 border-success-200 bg-success-50 p-5">
-            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-success">
-              <Receipt className="h-4 w-4" />
-              补贴计算
-            </h3>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-success">
+                <Receipt className="h-4 w-4" />
+                补贴计算
+              </h3>
+              <button
+                onClick={handleRefreshSubsidy}
+                className="flex items-center gap-1 text-xs text-success hover:underline"
+              >
+                <RefreshCw className="h-3 w-3" />
+                刷新
+              </button>
+            </div>
             {subsidy ? (
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
@@ -309,7 +335,7 @@ export default function NewReimbursement() {
                   onChange={(e) => setExplanation(e.target.value)}
                   className="w-full rounded-lg border border-danger-300 p-3 text-sm outline-none focus:border-danger"
                   rows={3}
-                  placeholder="请详细说明超出预算 ¥{overAmount.toLocaleString()} 的原因..."
+                  placeholder={`请详细说明超出预算 ¥${overAmount.toLocaleString()} 的原因...`}
                   required
                 />
               </div>
