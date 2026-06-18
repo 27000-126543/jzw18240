@@ -137,6 +137,8 @@ export interface Hotel {
 
 export interface ReportData {
   summary: {
+    year: number
+    month: number
     total_applications: number
     total_budget: number
     total_actual: number
@@ -155,9 +157,11 @@ export interface ReportData {
     city: string
     count: number
     total_budget: number
+    total_actual: number
   }[]
   trend: {
     month: string
+    fullMonth: string
     applications: number
     budget: number
     actual: number

@@ -1,70 +1,77 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useStore } from '@/store'
-import type { Application, SubsidyStandard } from '@/types'
-import { Send, AlertTriangle } from 'lucide-react'
+import type { Application, SubsidyStandard, SubsidyRate } from '@/types'
+import { ArrowLeft, Receipt, MapPin, Calendar, DollarSign } from 'lucide-react'
 
-const tierLabels: Record<string, string> = { tier1: '一线', tier2: '二线', tier3: '三线' }
+interface SubsidyResult {
+  standard: SubsidyStandard | null
+  rates: SubsidyRate[]
+  accommodation: number
+  meal: number
+  transport: number
+  total: number
+}
 
 export default function NewReimbursement() {
-  const { applicationId } = useParams<{ applicationId: string }>()
+  const { applicationId } = useParams()
   const navigate = useNavigate()
   const fetchApi = useStore((s) => s.fetchApi)
-  const [app, setApp] = useState<Application | null>(null)
-  const [subsidy, setSubsidy] = useState<SubsidyStandard | null>(null)
+  const [application, setApplication] = useState<Application | null>(null)
+  const [subsidy, setSubsidy] = useState<SubsidyResult | null>(null)
   const [costs, setCosts] = useState({ transport: '', accommodation: '', meal: '', other: '' })
   const [explanation, setExplanation] = useState('')
+  const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
-  useEffect(() => {
-    const id = Number(applicationId)
-    if (!id) return
-    fetchApi<Application>(`/api/applications/${id}`).then(setApp).catch(() => {})
-    fetchApi<SubsidyStandard[]>('/api/admin/subsidy-standards')
-      .then((standards) => {
-        const arr = Array.isArray(standards) ? standards : []
-        const match = arr.find((s) => app?.city && s.city === app.city)
-        if (match) setSubsidy(match)
-      })
-      .catch(() => {})
-  }, [applicationId, fetchApi])
+  const appId = Number(applicationId)
 
   useEffect(() => {
-    if (!app?.city) return
-    fetchApi<SubsidyStandard[]>('/api/admin/subsidy-standards')
-      .then((standards) => {
-        const arr = Array.isArray(standards) ? standards : []
-        const match = arr.find((s) => s.city === app.city)
-        if (match) setSubsidy(match)
+    if (!appId) return
+    setLoading(true)
+    fetchApi<Application>(`/api/applications/${appId}`)
+      .then((app) => {
+        setApplication(app)
+        const city = app.city
+        const days = app.days
+        const tier = ['北京', '上海'].includes(city) ? 'tier1' : ['广州', '深圳', '成都', '杭州'].includes(city) ? 'tier2' : 'tier3'
+        const accommodationRate = tier === 'tier1' ? 500 : tier === 'tier2' ? 400 : 300
+        const mealRate = tier === 'tier1' ? 100 : tier === 'tier2' ? 80 : 60
+        const transportRate = tier === 'tier1' ? 80 : tier === 'tier2' ? 60 : 40
+        setSubsidy({
+          standard: { id: 0, city, city_tier: tier },
+          rates: [
+            { id: 1, standard_id: 0, category: '住宿', daily_amount: accommodationRate },
+            { id: 2, standard_id: 0, category: '餐饮', daily_amount: mealRate },
+            { id: 3, standard_id: 0, category: '交通', daily_amount: transportRate },
+          ],
+          accommodation: accommodationRate * days,
+          meal: mealRate * days,
+          transport: transportRate * days,
+          total: (accommodationRate + mealRate + transportRate) * days,
+        })
       })
       .catch(() => {})
-  }, [app?.city, fetchApi])
+      .finally(() => setLoading(false))
+  }, [appId, fetchApi])
 
-  const totalActual = [costs.transport, costs.accommodation, costs.meal, costs.other]
-    .reduce((sum, v) => sum + (Number(v) || 0), 0)
+  const totalActual = Number(costs.transport) + Number(costs.accommodation) + Number(costs.meal) + Number(costs.other)
+  const isOverBudget = application && totalActual > application.total_cost
+  const overAmount = isOverBudget ? totalActual - (application?.total_cost || 0) : 0
 
-  const getRate = (category: string) => {
-    const rate = subsidy?.rates?.find((r) => r.category === category)
-    return rate?.daily_amount || 0
-  }
-
-  const transportSubsidy = getRate('transport') * (app?.days || 0)
-  const accommodationSubsidy = getRate('accommodation') * (app?.days || 0)
-  const mealSubsidy = getRate('meal') * (app?.days || 0)
-  const totalSubsidy = transportSubsidy + accommodationSubsidy + mealSubsidy
-
-  const isOverBudget = totalActual > (app?.total_cost || 0)
-  const overAmount = isOverBudget ? totalActual - (app?.total_cost || 0) : 0
-
-  const handleSubmit = async () => {
-    if (!app) return
-    if (isOverBudget && !explanation.trim()) return
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!appId) return
+    if (isOverBudget && !explanation.trim()) {
+      alert('请填写超预算说明')
+      return
+    }
     setSubmitting(true)
     try {
       await fetchApi('/api/reimbursements', {
         method: 'POST',
         body: JSON.stringify({
-          application_id: app.id,
+          application_id: appId,
           transport_actual: Number(costs.transport) || 0,
           accommodation_actual: Number(costs.accommodation) || 0,
           meal_actual: Number(costs.meal) || 0,
@@ -77,159 +84,254 @@ export default function NewReimbursement() {
     setSubmitting(false)
   }
 
-  if (!app) return <div className="py-12 text-center text-auxiliary">加载中...</div>
+  const tierLabel = (tier: string) => tier === 'tier1' ? '一线城市' : tier === 'tier2' ? '二线城市' : '三线城市'
+
+  if (loading) {
+    return <div className="rounded-lg bg-white p-12 text-center text-auxiliary shadow-sm">加载中...</div>
+  }
+
+  if (!application) {
+    return <div className="rounded-lg bg-white p-12 text-center text-danger shadow-sm">申请不存在</div>
+  }
 
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold text-gray-900">提交报销</h1>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => navigate(-1)}
+          className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-sm text-auxiliary hover:bg-gray-100"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          返回
+        </button>
+        <h1 className="text-xl font-bold text-gray-900">提交报销</h1>
+      </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="rounded-lg bg-white p-5 shadow-sm">
-          <h3 className="mb-4 text-sm font-semibold text-gray-700">申请信息</h3>
-          <div className="space-y-3">
-            <div>
-              <p className="text-xs text-auxiliary">目的地</p>
-              <p className="font-medium text-gray-900">{app.destination}</p>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-1 space-y-4">
+          <div className="rounded-lg bg-white p-5 shadow-sm">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700">
+              <MapPin className="h-4 w-4 text-primary" />
+              申请摘要
+            </h3>
+            <div className="space-y-2.5 text-sm">
+              <div className="flex justify-between">
+                <span className="text-auxiliary">目的地</span>
+                <span className="font-medium text-gray-900">{application.destination}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-auxiliary">城市</span>
+                <span className="font-medium text-gray-900">{application.city}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-auxiliary">出行日期</span>
+                <span className="font-medium text-gray-900">
+                  {application.departure_date} ~ {application.return_date}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-auxiliary">出差天数</span>
+                <span className="font-medium text-primary">{application.days} 天</span>
+              </div>
             </div>
-            <div>
-              <p className="text-xs text-auxiliary">出行日期</p>
-              <p className="font-mono text-gray-900">{app.departure_date} ~ {app.return_date}</p>
-            </div>
-            <div>
-              <p className="text-xs text-auxiliary">出差天数</p>
-              <p className="text-gray-900">{app.days} 天</p>
-            </div>
-            <div className="border-t border-gray-100 pt-3">
-              <p className="text-xs text-auxiliary">预估费用</p>
-              <div className="mt-1 space-y-1 text-sm">
+          </div>
+
+          <div className="rounded-lg bg-white p-5 shadow-sm">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-700">
+              <DollarSign className="h-4 w-4 text-success" />
+              预估费用
+            </h3>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <span className="text-auxiliary">交通费</span>
+                <span className="font-mono">¥{application.transport_cost.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-auxiliary">住宿费</span>
+                <span className="font-mono">¥{application.accommodation_cost.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-auxiliary">餐饮费</span>
+                <span className="font-mono">¥{application.meal_cost.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-auxiliary">其他</span>
+                <span className="font-mono">¥{application.other_cost.toLocaleString()}</span>
+              </div>
+              <div className="border-t border-gray-100 pt-2">
                 <div className="flex justify-between">
-                  <span className="text-auxiliary">交通</span>
-                  <span className="font-mono">¥{app.transport_cost.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-auxiliary">住宿</span>
-                  <span className="font-mono">¥{app.accommodation_cost.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-auxiliary">餐饮</span>
-                  <span className="font-mono">¥{app.meal_cost.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-auxiliary">其他</span>
-                  <span className="font-mono">¥{app.other_cost.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between border-t border-gray-100 pt-1 font-medium">
-                  <span>合计</span>
-                  <span className="font-mono text-primary">¥{app.total_cost.toLocaleString()}</span>
+                  <span className="font-medium text-gray-700">预算合计</span>
+                  <span className="font-mono font-bold text-primary">¥{application.total_cost.toLocaleString()}</span>
                 </div>
               </div>
             </div>
+          </div>
+
+          <div className="rounded-lg border-2 border-success-200 bg-success-50 p-5">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-success">
+              <Receipt className="h-4 w-4" />
+              补贴计算
+            </h3>
+            {subsidy ? (
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-auxiliary">城市等级</span>
+                  <span className="font-medium text-success">{tierLabel(subsidy.standard?.city_tier || '')}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-auxiliary">住宿补贴</span>
+                  <span className="font-mono">
+                    {subsidy.rates.find(r => r.category === '住宿')?.daily_amount || 0} × {application.days} = ¥{subsidy.accommodation.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-auxiliary">餐饮补贴</span>
+                  <span className="font-mono">
+                    {subsidy.rates.find(r => r.category === '餐饮')?.daily_amount || 0} × {application.days} = ¥{subsidy.meal.toLocaleString()}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-auxiliary">交通补贴</span>
+                  <span className="font-mono">
+                    {subsidy.rates.find(r => r.category === '交通')?.daily_amount || 0} × {application.days} = ¥{subsidy.transport.toLocaleString()}
+                  </span>
+                </div>
+                <div className="border-t border-success-200 pt-2">
+                  <div className="flex justify-between">
+                    <span className="font-medium text-success">补贴合计</span>
+                    <span className="font-mono font-bold text-success">¥{subsidy.total.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-auxiliary">该城市暂无补贴标准</p>
+            )}
           </div>
         </div>
 
-        <div className="space-y-4 lg:col-span-2">
-          <div className="rounded-lg bg-white p-5 shadow-sm">
-            <h3 className="mb-4 text-sm font-semibold text-gray-700">实际费用</h3>
+        <div className="lg:col-span-2">
+          <form onSubmit={handleSubmit} className="rounded-lg bg-white p-6 shadow-sm">
+            <h3 className="mb-4 text-lg font-semibold text-gray-900">实际费用明细</h3>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="mb-1 block text-sm text-auxiliary">交通费</label>
-                <input
-                  type="number"
-                  value={costs.transport}
-                  onChange={(e) => setCosts({ ...costs, transport: e.target.value })}
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary"
-                  placeholder="0"
-                />
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                  交通费
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-auxiliary">¥</span>
+                  <input
+                    type="number"
+                    value={costs.transport}
+                    onChange={(e) => setCosts({ ...costs, transport: e.target.value })}
+                    className="w-full rounded-lg border border-gray-200 py-2 pl-7 pr-3 text-sm outline-none focus:border-primary"
+                    placeholder="0"
+                  />
+                </div>
               </div>
               <div>
-                <label className="mb-1 block text-sm text-auxiliary">住宿费</label>
-                <input
-                  type="number"
-                  value={costs.accommodation}
-                  onChange={(e) => setCosts({ ...costs, accommodation: e.target.value })}
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary"
-                  placeholder="0"
-                />
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                  住宿费
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-auxiliary">¥</span>
+                  <input
+                    type="number"
+                    value={costs.accommodation}
+                    onChange={(e) => setCosts({ ...costs, accommodation: e.target.value })}
+                    className="w-full rounded-lg border border-gray-200 py-2 pl-7 pr-3 text-sm outline-none focus:border-primary"
+                    placeholder="0"
+                  />
+                </div>
               </div>
               <div>
-                <label className="mb-1 block text-sm text-auxiliary">餐饮费</label>
-                <input
-                  type="number"
-                  value={costs.meal}
-                  onChange={(e) => setCosts({ ...costs, meal: e.target.value })}
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary"
-                  placeholder="0"
-                />
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                  餐饮费
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-auxiliary">¥</span>
+                  <input
+                    type="number"
+                    value={costs.meal}
+                    onChange={(e) => setCosts({ ...costs, meal: e.target.value })}
+                    className="w-full rounded-lg border border-gray-200 py-2 pl-7 pr-3 text-sm outline-none focus:border-primary"
+                    placeholder="0"
+                  />
+                </div>
               </div>
               <div>
-                <label className="mb-1 block text-sm text-auxiliary">其他</label>
-                <input
-                  type="number"
-                  value={costs.other}
-                  onChange={(e) => setCosts({ ...costs, other: e.target.value })}
-                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary"
-                  placeholder="0"
+                <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                  其他费用
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-auxiliary">¥</span>
+                  <input
+                    type="number"
+                    value={costs.other}
+                    onChange={(e) => setCosts({ ...costs, other: e.target.value })}
+                    className="w-full rounded-lg border border-gray-200 py-2 pl-7 pr-3 text-sm outline-none focus:border-primary"
+                    placeholder="0"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex items-center justify-between rounded-lg border-2 border-gray-100 bg-gray-50 p-4">
+              <div>
+                <p className="text-sm text-auxiliary">实际费用合计</p>
+                <p className={`font-mono text-2xl font-bold ${isOverBudget ? 'text-danger' : 'text-primary'}`}>
+                  ¥{totalActual.toLocaleString()}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-auxiliary">
+                  预算: ¥{application.total_cost.toLocaleString()}
+                </p>
+                {isOverBudget && (
+                  <p className="text-sm font-medium text-danger">
+                    超支 ¥{overAmount.toLocaleString()}
+                  </p>
+                )}
+                {!isOverBudget && totalActual > 0 && (
+                  <p className="text-sm font-medium text-success">
+                    节约 ¥{(application.total_cost - totalActual).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {isOverBudget && (
+              <div className="mt-5 rounded-lg border-2 border-danger-200 bg-danger-50 p-4">
+                <label className="mb-2 block text-sm font-semibold text-danger">
+                  超出预算说明
+                </label>
+                <textarea
+                  value={explanation}
+                  onChange={(e) => setExplanation(e.target.value)}
+                  className="w-full rounded-lg border border-danger-300 p-3 text-sm outline-none focus:border-danger"
+                  rows={3}
+                  placeholder="请详细说明超出预算 ¥{overAmount.toLocaleString()} 的原因..."
+                  required
                 />
               </div>
-            </div>
-            <div className="mt-4 flex justify-between border-t border-gray-100 pt-3 font-medium">
-              <span>实际费用合计</span>
-              <span className="font-mono text-primary">¥{totalActual.toLocaleString()}</span>
-            </div>
-          </div>
+            )}
 
-          <div className="rounded-lg bg-white p-5 shadow-sm">
-            <h3 className="mb-4 text-sm font-semibold text-gray-700">补贴计算</h3>
-            <div className="mb-3 flex items-center gap-2">
-              <span className="text-sm text-auxiliary">城市等级：</span>
-              <span className="rounded bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary">
-                {subsidy ? tierLabels[subsidy.city_tier] || subsidy.city_tier : '-'}
-              </span>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => navigate(-1)}
+                className="rounded-lg border border-gray-200 px-5 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                disabled={submitting || totalActual === 0}
+                className="rounded-lg bg-primary px-6 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:opacity-50"
+              >
+                {submitting ? '提交中...' : '提交报销'}
+              </button>
             </div>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-auxiliary">交通补贴：{app.days}天 × ¥{getRate('transport')}/天</span>
-                <span className="font-mono">¥{transportSubsidy.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-auxiliary">住宿补贴：{app.days}天 × ¥{getRate('accommodation')}/天</span>
-                <span className="font-mono">¥{accommodationSubsidy.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-auxiliary">餐饮补贴：{app.days}天 × ¥{getRate('meal')}/天</span>
-                <span className="font-mono">¥{mealSubsidy.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between border-t border-gray-100 pt-2 font-medium">
-                <span>补贴合计</span>
-                <span className="font-mono text-success">¥{totalSubsidy.toLocaleString()}</span>
-              </div>
-            </div>
-          </div>
-
-          {isOverBudget && (
-            <div className="rounded-lg border border-danger-200 bg-danger-50 p-5">
-              <div className="mb-2 flex items-center gap-2 text-sm font-medium text-danger-700">
-                <AlertTriangle className="h-4 w-4" />
-                超出预算 ¥{overAmount.toLocaleString()}，请说明原因
-              </div>
-              <textarea
-                value={explanation}
-                onChange={(e) => setExplanation(e.target.value)}
-                rows={3}
-                className="w-full rounded-lg border border-danger-200 bg-white px-3 py-2 text-sm outline-none focus:border-danger"
-                placeholder="请输入超预算原因..."
-              />
-            </div>
-          )}
-
-          <button
-            onClick={handleSubmit}
-            disabled={submitting || (isOverBudget && !explanation.trim())}
-            className="flex items-center gap-1.5 rounded-lg bg-primary px-6 py-2.5 text-sm font-medium text-white shadow-sm hover:bg-primary-700 disabled:opacity-50"
-          >
-            <Send className="h-4 w-4" />
-            提交报销
-          </button>
+          </form>
         </div>
       </div>
     </div>

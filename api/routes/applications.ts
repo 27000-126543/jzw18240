@@ -46,7 +46,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
     status: 'pending', days,
   })
 
-  const route = db.approvalRoutes.findMatchingRoute(total_cost)
+  const route = db.approvalRoutes.findMatchingRoute(total_cost, user.rank)
   if (route) {
     const steps = db.approvalRouteSteps.findByRouteId(route.id)
     steps.sort((a, b) => a.step_order - b.step_order)

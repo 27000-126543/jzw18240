@@ -43,14 +43,17 @@ export default function NewApplication() {
     : 0
 
   const checkApprovalRoute = async (amount: number) => {
-    if (amount <= 0) {
+    if (amount <= 0 || !currentUser) {
       setMatchedRoute(null)
       return
     }
     try {
       const routes = await fetchApi<ApprovalRoute[]>('/api/admin/approval-routes')
       const match = routes.find(
-        (r) => amount >= r.min_amount && (r.max_amount === null || amount < r.max_amount),
+        (r) =>
+          r.rank === currentUser.rank &&
+          amount >= r.min_amount &&
+          (r.max_amount === null || amount < r.max_amount),
       )
       setMatchedRoute(match || null)
     } catch {
@@ -215,18 +218,23 @@ export default function NewApplication() {
               审批路由预览
             </h2>
             <div className="rounded-lg bg-primary-50 p-4">
-              <p className="text-sm font-medium text-primary">
-                {matchedRoute.name}
-              </p>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-primary">
+                  {matchedRoute.name}
+                </span>
+                <span className="rounded-full bg-accent-100 px-2 py-0.5 text-xs font-medium text-accent-700">
+                  {currentUser?.rank === 'junior' ? '员工' : currentUser?.rank === 'senior' ? '高级员工' : currentUser?.rank === 'director' ? '总监' : '副总裁'}
+                </span>
+              </div>
               <p className="mt-1 text-xs text-auxiliary">
                 费用范围：¥{matchedRoute.min_amount.toLocaleString()} - {matchedRoute.max_amount ? `¥${matchedRoute.max_amount.toLocaleString()}` : '无上限'}
               </p>
               {matchedRoute.steps && matchedRoute.steps.length > 0 && (
-                <div className="mt-2 flex items-center gap-2">
+                <div className="mt-3 flex flex-wrap items-center gap-2">
                   {matchedRoute.steps.map((step, idx) => (
                     <span key={step.id} className="flex items-center gap-2 text-xs">
-                      <span className="rounded bg-primary px-2 py-0.5 text-white">
-                        第{step.step_order}步：{step.approver_role}
+                      <span className="rounded bg-primary px-2.5 py-1 font-medium text-white">
+                        第{step.step_order}步：{step.approver_role === 'manager' ? '部门经理' : step.approver_role === 'director' ? '总监' : '副总裁'}
                       </span>
                       {idx < matchedRoute.steps!.length - 1 && <ChevronRight className="h-3 w-3 text-auxiliary" />}
                     </span>
